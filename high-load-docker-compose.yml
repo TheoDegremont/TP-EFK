@@ -1,0 +1,37 @@
+services:
+  # Générateurs supplémentaires pour haute charge
+  load-generator-1:
+    build: ./generators
+    container_name: load-gen-1
+    volumes:
+      - ./logs/load:/logs
+    environment:
+      - LOG_TYPE=application
+      - LOG_RATE=500
+      - LOG_FILE=/logs/app-heavy-1.log
+    networks:
+      - efk
+
+  load-generator-2:
+    build: ./generators
+    container_name: load-gen-2
+    volumes:
+      - ./logs/load:/logs
+    environment:
+      - LOG_TYPE=application
+      - LOG_RATE=500
+      - LOG_FILE=/logs/app-heavy-2.log
+    networks:
+      - efk
+
+  load-generator-3:
+    build: ./generators
+    container_name: load-gen-3
+    volumes:
+      - ./logs/load:/logs
+    environment:
+      - LOG_TYPE=nginx
+      - LOG_RATE=1000
+      - LOG_FILE=/logs/nginx-heavy.log
+    networks:
+      - efk

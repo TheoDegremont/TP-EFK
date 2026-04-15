@@ -1,0 +1,128 @@
+networks:
+  efk:
+    driver: bridge
+
+volumes:
+  elasticsearch_data:
+
+services:
+  # Elasticsearch - Stockage et indexation
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - ES_JAVA_OPTS=-Xms2g -Xmx2g
+      - cluster.name=efk-cluster
+      - node.name=es-node-01
+      - bootstrap.memory_lock=true
+      - indices.query.bool.max_clause_count=10000
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    networks:
+      - efk
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Kibana - Visualisation
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - xpack.security.enabled=false
+      - xpack.encryptedSavedObjects.encryptionKey=efk-tp-kibana-encryption-key-32chars
+      - monitoring.ui.container.elasticsearch.enabled=true
+    ports:
+      - "5601:5601"
+    networks:
+      - efk
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Fluentd - Collecte et traitement
+  fluentd:
+    build: ./fluentd
+    container_name: fluentd
+    volumes:
+      - ./fluentd/conf:/fluentd/etc
+      - ./logs:/var/log/containers
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+      - "9880:9880"
+    networks:
+      - efk
+    depends_on:
+      - elasticsearch
+    environment:
+      - FLUENTD_CONF=fluent.conf
+
+  # Générateur de logs - Application
+  log-generator-app:
+    build: ./generators
+    container_name: log-generator-app
+    volumes:
+      - ./logs/app:/logs
+    environment:
+      - LOG_TYPE=application
+      - LOG_RATE=100
+      - LOG_FILE=/logs/application.log
+    networks:
+      - efk
+    depends_on:
+      - fluentd
+
+  # Générateur de logs - Nginx
+  log-generator-nginx:
+    build: ./generators
+    container_name: log-generator-nginx
+    volumes:
+      - ./logs/nginx:/logs
+    environment:
+      - LOG_TYPE=nginx
+      - LOG_RATE=200
+      - LOG_FILE=/logs/access.log
+    networks:
+      - efk
+    depends_on:
+      - fluentd
+
+  # Générateur de logs - System
+  log-generator-system:
+    build: ./generators
+    container_name: log-generator-system
+    volumes:
+      - ./logs/system:/logs
+    environment:
+      - LOG_TYPE=system
+      - LOG_RATE=50
+      - LOG_FILE=/logs/syslog
+    networks:
+      - efk
+    depends_on:
+      - fluentd
